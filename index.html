@@ -153,8 +153,7 @@ const SPREAD = 29;   /* degrees between racks (bigger = racks further apart) */
 const CURVE = 0.35;  /* how much the racks wrap around you (0 = flat wall) */
 const RACKS = [
   { label: "แจ็คเก็ต", match: ["Jackets"] },
-  { label: "เสื้อ", match: ["Tops"] },
-  { label: "ยีนส์ & กางเกง", match: ["Jeans", "Pants"] }
+  { label: "เสื้อ", match: ["Tops"] }
 ];
 
 const $ = (s) => document.querySelector(s);
@@ -162,9 +161,22 @@ const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const baht = (n) => "฿" + Number(n || 0).toLocaleString("en-US");
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const P = (window.BB_PRODUCTS || []).map((p) => Object.assign({ r: 1.3 }, p));
-/* Curated showroom: three racks, five real products each. */
+/* Boutique preview: two racks, five real product styles each. */
 const RACK_CAPACITY = 5;
-const racks = RACKS.map(r => ({ ...r, items: P.filter(p => r.match.includes(p.category)).slice(0,RACK_CAPACITY) }));
+/* Separate real color photos, when present in catalog, are placed adjacent.
+   A color name without a distinct image is not duplicated as a fake colorway. */
+const colorVariants = p => Array.isArray(p.variants) ? p.variants.filter(v => v && v.img) : [];
+const racks = RACKS.map(r => {
+  const items = [];
+  for (const p of P.filter(p => r.match.includes(p.category))) {
+    if (items.length >= RACK_CAPACITY) break;
+    const variants = colorVariants(p);
+    if (variants.length > 1 && variants.length <= RACK_CAPACITY - items.length) {
+      variants.forEach(v => items.push({...p, code:p.code+"-"+(v.code||v.color||items.length),img:v.img, colorLabel:v.color||""}));
+    } else items.push(p);
+  }
+  return {...r, items};
+});
 const S = { yaw: 0, sel: null, detail: null, size: "", color: "", cart: 0, w: 0, h: 0 };
 const app = $("#app"), stage = $("#stage"), world = $("#world");
 let G = null, drag = null, moved = false, anim = 0, wheelT = 0, toastT = 0;
@@ -189,12 +201,12 @@ function build() {
   world.innerHTML = racks.map((r, i) => {
     const n = r.items.length;
     const gw = Math.min(G.Wr * (G.ph ? 0.36 : 0.27), G.postH * 0.55);
-    const sp = n > 1 ? (G.Wr - gw - 32) / (n - 1) : 0;
+    const sp = n > 1 ? (G.Wr - gw + (G.ph ? 28 : 8)) / (n - 1) : 0;
     const x0 = (G.Wr - gw - sp * (n - 1)) / 2;
     const items = r.items.map((p, k) => {
       let wk = gw; if (wk * p.r > G.postH * 0.8) wk = (G.postH * 0.8) / p.r;
       const left = x0 + k * sp + (gw - wk) / 2;
-      return `<button class="g" type="button" data-id="${esc(p.code)}" data-k="${k}" data-display="${p.display === "mannequin" ? "mannequin" : "hanger"}" aria-label="${esc(p.name)} ${baht(p.price)}" style="left:${left.toFixed(1)}px;width:${wk.toFixed(1)}px;transform:translateZ(${(k * 0.7).toFixed(1)}px)"><span class="hanger-visual" aria-hidden="true"></span><img src="${esc(p.img)}" alt="" draggable="false" style="height:${(wk * p.r).toFixed(1)}px"></button>`;
+      return `<button class="g" type="button" data-id="${esc(p.code)}" data-k="${k}" data-display="${p.display === "mannequin" ? "mannequin" : "hanger"}" aria-label="${esc(p.name)} ${p.colorLabel ? esc(p.colorLabel) : ""} ${baht(p.price)}" style="left:${left.toFixed(1)}px;width:${wk.toFixed(1)}px;transform:translateZ(${(k * 0.7).toFixed(1)}px)"><span class="hanger-visual" aria-hidden="true"></span><img src="${esc(p.img)}" alt="" draggable="false" style="height:${(wk * p.r).toFixed(1)}px"></button>`;
     }).join("");
     return `<div class="rack" data-r="${i}" style="left:${(-G.Wr / 2).toFixed(1)}px;width:${G.Wr.toFixed(1)}px;height:${G.postH.toFixed(1)}px;transform:rotateY(${-(i - (racks.length-1)/2) * SPREAD}deg) translateZ(${(-G.a).toFixed(1)}px)">
       <div class="label">${esc(r.label)} <span>· ${n}</span></div>
@@ -231,14 +243,14 @@ function paintSel() {
     const k = Number(b.dataset.k), r = Number(b.closest(".rack").dataset.r);
     const active = r === rackIndex && k === selectedIndex;
     const isNeighbor = r === rackIndex && selectedIndex >= 0;
-    const gap = G.ph ? 18 : 34;
+    const gap = G.ph ? 25 : 42;
     const shift = isNeighbor ? (k < selectedIndex ? -gap : k > selectedIndex ? gap : 0) : 0;
     b.classList.toggle("on",active);
     b.style.transform = `translateX(${shift}px) translateZ(${active?125: k*.7}px) translateY(${active?12:0}px) scale(${active?1.14:1})`;
     b.style.opacity = isNeighbor && !active ? .86 : 1;
     b.style.zIndex = active ? 20 : String(5-Math.abs(k-selectedIndex));
   });
-  const p = P.find(x=>x.code===S.sel);
+  const p = racks.flatMap(r=>r.items).find(x=>x.code===S.sel);
   $("#card").classList.toggle("show",!!p && !S.detail);
   $("#hint").style.display = S.hintGone || p ? "none" : "";
   if(p){$("#cCode").textContent=p.code;$("#cName").textContent=p.name;$("#cPrice").textContent=baht(p.price);}
@@ -322,7 +334,7 @@ app.addEventListener("click", (e) => {
 
 /* product page */
 function openDetail(id) {
-  const p = P.find((x) => x.code === id); if (!p) return;
+  const p = racks.flatMap(r=>r.items).find((x) => x.code === id); if (!p) return;
   S.detail = id; S.face = "front"; S.sel = id; S.size = p.sizes.length === 1 ? p.sizes[0] : ""; S.color = p.colors.length === 1 ? p.colors[0] : "";
   drawDetail(); $("#detail").classList.add("show"); paintSel(); $("#detail").scrollTop = 0;
 }
@@ -333,7 +345,7 @@ function stepDetail(dir) {
   openDetail(r.items[(i + dir + r.items.length) % r.items.length].code);
 }
 function drawDetail() {
-  const p = P.find((x) => x.code === S.detail); if (!p) return;
+  const p = racks.flatMap(r=>r.items).find((x) => x.code === S.detail); if (!p) return;
   const r = racks.find((rk) => rk.items.some((x) => x.code === p.code)), i = r.items.findIndex((x) => x.code === p.code);
   const L = r.items[(i - 1 + r.items.length) % r.items.length], R = r.items[(i + 1) % r.items.length];
   const back = p.backImg || p.imgBack || p.back || (Array.isArray(p.images) && p.images[1]) || null;
@@ -356,7 +368,7 @@ function drawDetail() {
       </div>
       <div class="d-info">
         <div class="turn-controls"><button class="opt btn" data-act="front" aria-pressed="${S.face!=='back'}">ด้านหน้า</button><button class="opt btn" data-act="back" ${back?'':'disabled title="ยังไม่มีภาพด้านหลัง"'} aria-pressed="${S.face==='back'}">ด้านหลัง ↻</button><span class="turn-note">${back?'แตะสลับมุมมองเพื่อหมุนสินค้า':'สินค้านี้ยังไม่มีรูปด้านหลัง'}</span></div>
-        <div><div class="cat">${esc(r.label)}</div><h1 id="dName">${esc(p.name)}</h1><div class="price">${baht(p.price)}</div></div>
+        <div><div class="cat">${esc(r.label)}</div><h1 id="dName">${esc(p.name)}${p.colorLabel ? " · "+esc(p.colorLabel) : ""}</h1><div class="price">${baht(p.price)}</div></div>
         ${p.sizes.length ? `<div><div class="lbl">ไซส์</div><div class="opts">${opt("size", p.sizes, S.size)}</div></div>` : ""}
         ${p.colors.length ? `<div><div class="lbl">สี</div><div class="opts">${opt("color", p.colors, S.color)}</div></div>` : ""}
         <button class="add btn" type="button" data-act="add">ใส่ตะกร้า · ${baht(p.price)}</button>
@@ -368,7 +380,7 @@ function drawDetail() {
 }
 function say(t) { const el = $("#toast"); el.textContent = t; el.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(() => el.classList.remove("show"), 2200); }
 function addCart() {
-  const p = P.find((x) => x.code === S.detail); if (!p) return;
+  const p = racks.flatMap(r=>r.items).find((x) => x.code === S.detail); if (!p) return;
   if (p.sizes.length > 1 && !S.size) return say("เลือกไซส์ก่อนนะคะ");
   if (p.colors.length > 1 && !S.color) return say("เลือกสีก่อนนะคะ");
   S.cart++; $("#cartN").textContent = S.cart; say("ใส่ตะกร้าแล้ว · " + p.name);
