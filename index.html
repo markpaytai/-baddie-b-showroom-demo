@@ -105,6 +105,10 @@ header{position:absolute;left:0;right:0;top:0;z-index:30;display:flex;align-item
 @keyframes in{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
 #toast{animation:none}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+.hanger-visual{position:absolute;left:50%;top:-12px;width:54%;height:35px;transform:translateX(-50%);pointer-events:none;opacity:.9;background:linear-gradient(135deg,transparent 47%,#a98f98 48%,#a98f98 51%,transparent 52%) left bottom/50% 60% no-repeat,linear-gradient(225deg,transparent 47%,#a98f98 48%,#a98f98 51%,transparent 52%) right bottom/50% 60% no-repeat}
+.hanger-visual:before{content:"";position:absolute;left:46%;top:-13px;width:13px;height:19px;border:2px solid #a98f98;border-bottom:0;border-radius:12px 12px 0 0;transform:rotate(22deg)}
+.g img{position:relative;z-index:1}
+.g[data-display="mannequin"] .hanger-visual{display:none}
 </style>
 </head>
 <body>
@@ -135,7 +139,7 @@ header{position:absolute;left:0;right:0;top:0;z-index:30;display:flex;align-item
 (function () {
 "use strict";
 /* ---- settings you can change ---- */
-const SPREAD = 34;   /* degrees between racks (bigger = racks further apart) */
+const SPREAD = 29;   /* degrees between racks (bigger = racks further apart) */
 const CURVE = 0.35;  /* how much the racks wrap around you (0 = flat wall) */
 const RACKS = [
   { label: "แจ็คเก็ต", match: ["Jackets"] },
@@ -149,7 +153,16 @@ const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const baht = (n) => "฿" + Number(n || 0).toLocaleString("en-US");
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const P = (window.BB_PRODUCTS || []).map((p) => Object.assign({ r: 1.3 }, p));
-const racks = RACKS.map((r) => Object.assign({}, r, { items: P.filter((p) => r.match.indexOf(p.category) >= 0) }));
+/* Keep each physical rack browsable: at most six garments per rack. */
+const RACK_CAPACITY = 6;
+const racks = RACKS.flatMap((r) => {
+  const all = P.filter((p) => r.match.includes(p.category));
+  const groups = [];
+  for (let i = 0; i < all.length; i += RACK_CAPACITY) {
+    groups.push({ ...r, label: r.label + (all.length > RACK_CAPACITY ? " · " + (groups.length + 1) : ""), items: all.slice(i, i + RACK_CAPACITY) });
+  }
+  return groups.length ? groups : [{ ...r, items: [] }];
+});
 const S = { yaw: 0, sel: null, detail: null, size: "", color: "", cart: 0, w: 0, h: 0 };
 const app = $("#app"), stage = $("#stage"), world = $("#world");
 let G = null, drag = null, moved = false, anim = 0, wheelT = 0, toastT = 0;
@@ -173,13 +186,13 @@ function build() {
   world.style.top = G.railY.toFixed(0) + "px";
   world.innerHTML = racks.map((r, i) => {
     const n = r.items.length;
-    const gw = Math.min(G.Wr * (G.ph ? 0.46 : 0.33), G.postH * 0.6) * (n > 9 ? 0.92 : 1);
-    const sp = n > 1 ? Math.min(gw * 0.6, (G.Wr - gw - 28) / (n - 1)) : 0;
+    const gw = Math.min(G.Wr * (G.ph ? 0.34 : 0.25), G.postH * 0.55);
+    const sp = n > 1 ? (G.Wr - gw - 44) / (n - 1) : 0;
     const x0 = (G.Wr - gw - sp * (n - 1)) / 2;
     const items = r.items.map((p, k) => {
       let wk = gw; if (wk * p.r > G.postH * 0.8) wk = (G.postH * 0.8) / p.r;
       const left = x0 + k * sp + (gw - wk) / 2;
-      return `<button class="g" type="button" data-id="${esc(p.code)}" data-k="${k}" aria-label="${esc(p.name)} ${baht(p.price)}" style="left:${left.toFixed(1)}px;width:${wk.toFixed(1)}px;transform:translateZ(${(k * 0.7).toFixed(1)}px)"><img src="${esc(p.img)}" alt="" draggable="false" style="height:${(wk * p.r).toFixed(1)}px"></button>`;
+      return `<button class="g" type="button" data-id="${esc(p.code)}" data-k="${k}" data-display="${p.display === "mannequin" ? "mannequin" : "hanger"}" aria-label="${esc(p.name)} ${baht(p.price)}" style="left:${left.toFixed(1)}px;width:${wk.toFixed(1)}px;transform:translateZ(${(k * 0.7).toFixed(1)}px)"><span class="hanger-visual" aria-hidden="true"></span><img src="${esc(p.img)}" alt="" draggable="false" style="height:${(wk * p.r).toFixed(1)}px"></button>`;
     }).join("");
     return `<div class="rack" data-r="${i}" style="left:${(-G.Wr / 2).toFixed(1)}px;width:${G.Wr.toFixed(1)}px;height:${G.postH.toFixed(1)}px;transform:rotateY(${-(i - 1.5) * SPREAD}deg) translateZ(${(-G.a).toFixed(1)}px)">
       <div class="label">${esc(r.label)} <span>· ${n}</span></div>
