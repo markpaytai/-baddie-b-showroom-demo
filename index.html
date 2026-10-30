@@ -109,6 +109,13 @@ header{position:absolute;left:0;right:0;top:0;z-index:30;display:flex;align-item
 .hanger-visual:before{content:"";position:absolute;left:46%;top:-13px;width:13px;height:19px;border:2px solid #a98f98;border-bottom:0;border-radius:12px 12px 0 0;transform:rotate(22deg)}
 .g img{position:relative;z-index:1}
 .g[data-display="mannequin"] .hanger-visual{display:none}
+.product-turn{position:relative;transform-style:preserve-3d;transition:transform .75s cubic-bezier(.2,.75,.2,1);perspective:900px;cursor:grab}
+.product-turn[data-side="back"]{transform:rotateY(180deg)}
+.product-turn .main{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;backface-visibility:hidden;-webkit-backface-visibility:hidden}
+.product-turn .back-face{transform:rotateY(180deg)}
+.turn-controls{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.turn-controls .opt:disabled{opacity:.4;cursor:not-allowed}
+.turn-note{font-size:12px;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -144,8 +151,7 @@ const CURVE = 0.35;  /* how much the racks wrap around you (0 = flat wall) */
 const RACKS = [
   { label: "แจ็คเก็ต", match: ["Jackets"] },
   { label: "เสื้อ", match: ["Tops"] },
-  { label: "ยีนส์ & กางเกง", match: ["Jeans", "Pants"] },
-  { label: "เดรส", match: ["Dresses"] }
+  { label: "ยีนส์ & กางเกง", match: ["Jeans", "Pants"] }
 ];
 
 const $ = (s) => document.querySelector(s);
@@ -153,22 +159,15 @@ const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "
 const baht = (n) => "฿" + Number(n || 0).toLocaleString("en-US");
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const P = (window.BB_PRODUCTS || []).map((p) => Object.assign({ r: 1.3 }, p));
-/* Keep each physical rack browsable: at most six garments per rack. */
-const RACK_CAPACITY = 4;
-const racks = RACKS.flatMap((r) => {
-  const all = P.filter((p) => r.match.includes(p.category));
-  const groups = [];
-  for (let i = 0; i < all.length; i += RACK_CAPACITY) {
-    groups.push({ ...r, label: r.label + (all.length > RACK_CAPACITY ? " · " + (groups.length + 1) : ""), items: all.slice(i, i + RACK_CAPACITY) });
-  }
-  return groups.length ? groups : [{ ...r, items: [] }];
-});
+/* Curated showroom: three racks, five real products each. */
+const RACK_CAPACITY = 5;
+const racks = RACKS.map(r => ({ ...r, items: P.filter(p => r.match.includes(p.category)).slice(0,RACK_CAPACITY) }));
 const S = { yaw: 0, sel: null, detail: null, size: "", color: "", cart: 0, w: 0, h: 0 };
 const app = $("#app"), stage = $("#stage"), world = $("#world");
 let G = null, drag = null, moved = false, anim = 0, wheelT = 0, toastT = 0;
 
 const phone = () => S.w < 700;
-const stops = () => phone() ? [-1.5 * SPREAD, -0.5 * SPREAD, 0.5 * SPREAD, 1.5 * SPREAD] : [-SPREAD, 0, SPREAD];
+const stops = () => racks.map((_,i) => (i - (racks.length-1)/2)*SPREAD);
 
 function geo() {
   const w = S.w, h = S.h, ph = phone();
@@ -194,7 +193,7 @@ function build() {
       const left = x0 + k * sp + (gw - wk) / 2;
       return `<button class="g" type="button" data-id="${esc(p.code)}" data-k="${k}" data-display="${p.display === "mannequin" ? "mannequin" : "hanger"}" aria-label="${esc(p.name)} ${baht(p.price)}" style="left:${left.toFixed(1)}px;width:${wk.toFixed(1)}px;transform:translateZ(${(k * 0.7).toFixed(1)}px)"><span class="hanger-visual" aria-hidden="true"></span><img src="${esc(p.img)}" alt="" draggable="false" style="height:${(wk * p.r).toFixed(1)}px"></button>`;
     }).join("");
-    return `<div class="rack" data-r="${i}" style="left:${(-G.Wr / 2).toFixed(1)}px;width:${G.Wr.toFixed(1)}px;height:${G.postH.toFixed(1)}px;transform:rotateY(${-(i - 1.5) * SPREAD}deg) translateZ(${(-G.a).toFixed(1)}px)">
+    return `<div class="rack" data-r="${i}" style="left:${(-G.Wr / 2).toFixed(1)}px;width:${G.Wr.toFixed(1)}px;height:${G.postH.toFixed(1)}px;transform:rotateY(${-(i - (racks.length-1)/2) * SPREAD}deg) translateZ(${(-G.a).toFixed(1)}px)">
       <div class="label">${esc(r.label)} <span>· ${n}</span></div>
       <div class="shadow" style="top:${(G.postH - 14).toFixed(1)}px"></div>
       <div class="post" style="left:-10px;height:${G.postH.toFixed(1)}px"></div><div class="post" style="right:-10px;height:${G.postH.toFixed(1)}px"></div>
@@ -212,14 +211,14 @@ function paint() {
   if (!G) return;
   world.style.transform = `translateZ(${(G.p - G.cam).toFixed(1)}px) rotateY(${S.yaw.toFixed(2)}deg)`;
   world.querySelectorAll(".rack").forEach((el, i) => {
-    const diff = Math.abs((i - 1.5) * SPREAD - S.yaw) / SPREAD;
+    const diff = Math.abs((i - (racks.length-1)/2) * SPREAD - S.yaw) / SPREAD;
     el.querySelector(".fog").style.opacity = clamp((diff - (G.ph ? 0.45 : 0.9)) * 0.5, 0, 0.55).toFixed(2);
   });
   const st = stops();
   $("#prev").disabled = S.yaw <= st[0] + 0.5;
   $("#next").disabled = S.yaw >= st[st.length - 1] - 0.5;
-  const idx = Math.round(S.yaw / SPREAD + 1.5), pair = clamp(Math.round(S.yaw / SPREAD), -1, 1);
-  document.querySelectorAll(".chip").forEach((c, i) => c.setAttribute("aria-pressed", String(G.ph ? idx === i : (i === pair + 1 || i === pair + 2))));
+  const idx = clamp(Math.round(S.yaw / SPREAD + (racks.length-1)/2),0,racks.length-1), pair = idx;
+  document.querySelectorAll(".chip").forEach((c, i) => c.setAttribute("aria-pressed", String(idx === i)));
 }
 function paintSel() {
   const rack = racks.find((r) => r.items.some((x) => x.code === S.sel));
@@ -251,7 +250,7 @@ function goStop(dir) {
   st.forEach((s, k) => { if (Math.abs(s - S.yaw) < Math.abs(st[i] - S.yaw)) i = k; });
   glide(st[clamp(i + dir, 0, st.length - 1)]); hideHint();
 }
-function goRack(i) { glide(phone() ? (i - 1.5) * SPREAD : (i - 1.5) * SPREAD + (i < 1.5 ? 0.5 : -0.5) * SPREAD); hideHint(); }
+function goRack(i) { glide((i - (racks.length-1)/2) * SPREAD); hideHint(); }
 
 /* drag / swipe to walk along the racks */
 app.addEventListener("pointerdown", (e) => {
@@ -305,6 +304,7 @@ app.addEventListener("click", (e) => {
   if (act === "close") closeDetail();
   else if (act === "prev") stepDetail(-1);
   else if (act === "next") stepDetail(1);
+  else if (act === "front" || act === "back") { S.face = act; const turn = document.querySelector("#productTurn"); if(turn) turn.dataset.side=act; document.querySelectorAll(".turn-controls [data-act]").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.act===act))); }
   else if (act === "size") { S.size = a.dataset.v; drawDetail(); }
   else if (act === "color") { S.color = a.dataset.v; drawDetail(); }
   else if (act === "add") addCart();
@@ -313,7 +313,7 @@ app.addEventListener("click", (e) => {
 /* product page */
 function openDetail(id) {
   const p = P.find((x) => x.code === id); if (!p) return;
-  S.detail = id; S.sel = id; S.size = p.sizes.length === 1 ? p.sizes[0] : ""; S.color = p.colors.length === 1 ? p.colors[0] : "";
+  S.detail = id; S.face = "front"; S.sel = id; S.size = p.sizes.length === 1 ? p.sizes[0] : ""; S.color = p.colors.length === 1 ? p.colors[0] : "";
   drawDetail(); $("#detail").classList.add("show"); paintSel(); $("#detail").scrollTop = 0;
 }
 function closeDetail() { S.detail = null; $("#detail").classList.remove("show"); paintSel(); }
@@ -326,6 +326,7 @@ function drawDetail() {
   const p = P.find((x) => x.code === S.detail); if (!p) return;
   const r = racks.find((rk) => rk.items.some((x) => x.code === p.code)), i = r.items.findIndex((x) => x.code === p.code);
   const L = r.items[(i - 1 + r.items.length) % r.items.length], R = r.items[(i + 1) % r.items.length];
+  const back = p.backImg || p.imgBack || p.back || (Array.isArray(p.images) && p.images[1]) || null;
   const ih = G.ph ? Math.min(G.h * 0.46, 420) : Math.min(G.h * 0.66, 620), iw = Math.min(ih / p.r, G.ph ? G.w - 130 : 520);
   const opt = (kind, list, cur) => list.map((v) => `<button class="opt btn" type="button" data-act="${kind}" data-v="${esc(v)}" aria-pressed="${cur === v}">${esc(v)}</button>`).join("");
   const arrowL = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>';
@@ -337,13 +338,14 @@ function drawDetail() {
         <button class="round btn" type="button" data-act="prev" aria-label="ชิ้นก่อนหน้าในราว">${arrowL}</button>
         <div class="d-img">
           <img class="ghost gl" src="${esc(L.img)}" alt="">
-          <img class="main" src="${esc(p.img)}" alt="${esc(p.name)}" style="width:${iw.toFixed(0)}px;height:${(iw * p.r).toFixed(0)}px">
+          <div class="product-turn" id="productTurn" style="width:${iw.toFixed(0)}px;height:${(iw * p.r).toFixed(0)}px" data-side="${S.face||'front'}"><img class="main front-face" src="${esc(p.img)}" alt="${esc(p.name)} ด้านหน้า"><img class="main back-face" src="${esc(back||p.img)}" alt="${esc(p.name)} ด้านหลัง"></div>
           <img class="ghost gr" src="${esc(R.img)}" alt="">
           <div class="tag"><div class="str"></div><div class="card"><div class="hole"></div><b>BADDIE</b><small>${esc(p.code)}</small><strong>${baht(p.price)}</strong></div></div>
         </div>
         <button class="round btn" type="button" data-act="next" aria-label="ชิ้นถัดไปในราว">${arrowR}</button>
       </div>
       <div class="d-info">
+        <div class="turn-controls"><button class="opt btn" data-act="front" aria-pressed="${S.face!=='back'}">ด้านหน้า</button><button class="opt btn" data-act="back" ${back?'':'disabled title="ยังไม่มีภาพด้านหลัง"'} aria-pressed="${S.face==='back'}">ด้านหลัง ↻</button><span class="turn-note">${back?'แตะสลับมุมมองเพื่อหมุนสินค้า':'สินค้านี้ยังไม่มีรูปด้านหลัง'}</span></div>
         <div><div class="cat">${esc(r.label)}</div><h1 id="dName">${esc(p.name)}</h1><div class="price">${baht(p.price)}</div></div>
         ${p.sizes.length ? `<div><div class="lbl">ไซส์</div><div class="opts">${opt("size", p.sizes, S.size)}</div></div>` : ""}
         ${p.colors.length ? `<div><div class="lbl">สี</div><div class="opts">${opt("color", p.colors, S.color)}</div></div>` : ""}
@@ -366,7 +368,7 @@ function addCart() {
 function resize() {
   const w = app.clientWidth, h = app.clientHeight, modeChange = (w < 700) !== (S.w < 700) || !S.w;
   S.w = w; S.h = h;
-  if (modeChange) S.yaw = phone() ? -0.5 * SPREAD : 0;
+  if (modeChange) S.yaw = 0;
   build(); if (S.detail) drawDetail();
 }
 let rT = 0; window.addEventListener("resize", () => { clearTimeout(rT); rT = setTimeout(resize, 120); });
